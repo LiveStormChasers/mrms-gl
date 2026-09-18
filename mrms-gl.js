@@ -650,6 +650,7 @@
     uniform vec2 u_texel;         // 1/Ni, 1/Nj
     uniform float u_floor;        // minimum encoded value to draw at all
     uniform float u_feather;      // 0 = hard edges, 1 = coverage fades alpha
+    uniform float u_packed;       // 1 when the value packs a category, 0 otherwise
     varying vec2 v_merc;
     void main() {
       float u = (v_merc.x - u_bounds.x) / (u_bounds.y - u_bounds.x);
@@ -681,6 +682,29 @@
 
       // Value from cells that hold data only — emptiness never shifts the colour.
       float enc = (a * wa * ha + b * wb * hb + c * wc * hc + d * wd * hd) / cov;
+
+      // A packed value must NEVER be interpolated across a category boundary.
+      // Precipitation type carries the category in the hundreds digit, so rain at
+      // 50 dBZ is 50 and snow at 20 dBZ is 120; averaging them gives 85, which
+      // the palette reads as rain at 85 dBZ. Every rain/snow edge then draws a
+      // band of white and magenta that is not in the data. Take the nearest cell
+      // instead whenever the neighbours disagree about the category.
+      if (u_packed > 0.5) {
+        float band = floor(enc * 255.0 * 360.0 / 255.0 / 100.0);
+        float ba = floor(a * 255.0 * 360.0 / 255.0 / 100.0);
+        float bb = floor(b * 255.0 * 360.0 / 255.0 / 100.0);
+        float bc = floor(c * 255.0 * 360.0 / 255.0 / 100.0);
+        float bd = floor(d * 255.0 * 360.0 / 255.0 / 100.0);
+        float spread = max(max(ba, bb), max(bc, bd)) - min(min(ba, bb), min(bc, bd));
+        if (spread > 0.5) {
+          // Neighbours straddle a boundary — snap to the nearest cell so the edge
+          // is a hard line between two categories, which is what it physically is.
+          enc = (f.x < 0.5)
+              ? ((f.y < 0.5) ? a : c)
+              : ((f.y < 0.5) ? b : d);
+          if (enc <= u_floor) discard;
+        }
+      }
 
       vec4 col = texture2D(u_ramp, vec2(enc, 0.5));
       if (col.a <= 0.0) discard;
@@ -873,6 +897,8 @@
                    this._floorOverride !== null ? this._floorOverride
                                                 : (this._floors[this._kind] || this._floors.dbz));
       gl.uniform1f(gl.getUniformLocation(this._prog, 'u_feather'), this._feather);
+      gl.uniform1f(gl.getUniformLocation(this._prog, 'u_packed'),
+                   this._kind === 'ptyperefl' ? 1 : 0);
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this._dataTex);
