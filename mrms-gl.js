@@ -940,11 +940,18 @@
     setBlend(on) { this._blendOn = !!on; if (!on) this._blend = 0; },
     _blendOn: true,
 
-    // Spatial smoothing, 0 to 1. This is the lever that makes a loop read
-    // smoothly: frame count only lengthens the loop, and cross-fading only
-    // dissolves. Softening the edges is what stops a two-minute step looking
-    // like a jump.
-    _smooth: 0.5,
+    // Spatial smoothing, 0 to 1. OFF by default, and that is a considered
+    // default rather than an oversight.
+    //
+    // It is a 3x3 mean over every sample, so it softens the whole field, not
+    // only the edges — small cells, the texture inside a band and the speckle at
+    // the low end all go with it. On a tile-based renderer the data has already
+    // been resampled before it reaches the browser, so a further 0.5 there is a
+    // gentler operation than 0.5 on a raw 1 km grid. Here it reads as blur.
+    //
+    // Left in because it is occasionally wanted for a wide, quiet view, but it
+    // costs detail and should be turned on deliberately.
+    _smooth: 0,
     setSmooth(x) {
       this._smooth = Math.max(0, Math.min(1, Number(x) || 0));
       if (this._map) this._map.triggerRepaint();
