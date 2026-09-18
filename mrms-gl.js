@@ -1077,14 +1077,14 @@
 
       // Colour ramp. NEAREST, not LINEAR: linear here would bleed neighbouring
       // bands into one another and soften every colour boundary.
-      // LINEAR, not NEAREST. The data is quantised to half a decibel per byte,
-      // and sampling the ramp with NEAREST made those steps show as contour
-      // banding inside cells once zoomed in. Interpolating between texels
-      // recovers a continuous colour.
-      this._rampTex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, this._rampTex);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      // NEAREST, not LINEAR, and this matters more than it looks. LINEAR was
+      // tried to smooth the half-decibel quantisation, and it does — but it also
+      // fades every colour boundary in the palette, so green runs into yellow
+      // into red with no edge anywhere. Side by side on the same frame it reads
+      // as a blurred picture rather than a radar image. Hard bands are what makes
+      // a reflectivity field legible: the eye reads the boundary, not the gradient.
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA,
@@ -1245,7 +1245,9 @@
       const gl = map.painter && map.painter.context && map.painter.context.gl;
       if (!gl) return;
       gl.bindTexture(gl.TEXTURE_2D, this._rampTex);
-      const filt = this._kind === 'category' ? gl.NEAREST : gl.LINEAR;
+      // Always NEAREST — see the note at the creation site. A gradient between
+      // palette stops blurs every colour boundary in the field.
+      const filt = gl.NEAREST;
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filt);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filt);
       // A loaded .pal only applies to reflectivity — it is a dBZ table, and
