@@ -655,6 +655,19 @@
     uniform float u_packed;       // 1 when the value packs a category, 0 otherwise
     uniform float u_smooth;       // 0 = none, 1 = full neighbourhood average
     varying vec2 v_merc;
+    // Mean of a cell and its eight neighbours, ignoring empties so an edge is
+    // not dragged toward nothing.
+    float cellAvg(vec2 p, vec2 texel, float floorV) {
+      float acc = 0.0, wt = 0.0;
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          float sv = texture2D(u_data, p + vec2(float(dx), float(dy)) * texel).a;
+          if (sv >= floorV) { acc += sv; wt += 1.0; }
+        }
+      }
+      return wt > 0.0 ? acc / wt : 0.0;
+    }
+
     void main() {
       float u = (v_merc.x - u_bounds.x) / (u_bounds.y - u_bounds.x);
       float mercY = (0.5 - v_merc.y) * 6.283185307;
@@ -695,6 +708,19 @@
         d = mix(d, nd, u_blend);
       }
 
+      // Spatial smoothing, applied to each corner sample BEFORE they are
+      // interpolated between. An earlier version averaged the final value
+      // instead, anchored to the base cell — which made the result constant
+      // across each cell, destroying the interpolation and drawing flat 1 km
+      // blocks. Smoothing the corners keeps the field continuous and only
+      // softens where it changes sharply.
+      if (u_smooth > 0.0 && u_packed < 0.5) {
+        a = mix(a, cellAvg(o, u_texel, u_floor), u_smooth);
+        b = mix(b, cellAvg(o + vec2(u_texel.x, 0.0), u_texel, u_floor), u_smooth);
+        c = mix(c, cellAvg(o + vec2(0.0, u_texel.y), u_texel, u_floor), u_smooth);
+        d = mix(d, cellAvg(o + u_texel, u_texel, u_floor), u_smooth);
+      }
+
       float ha = step(u_floor, a), hb = step(u_floor, b);
       float hc = step(u_floor, c), hd = step(u_floor, d);
 
@@ -730,24 +756,6 @@
               : ((f.y < 0.5) ? b : d);
           if (enc <= u_floor) discard;
         }
-      }
-
-      // Spatial smoothing. Sampling four cells gives a hard-edged field, and a
-      // two-minute step between hard edges reads as a jump however the timing is
-      // tuned. Widening the neighbourhood softens the edges, so consecutive
-      // frames differ less abruptly — it does not change the data, only how
-      // sharply it is drawn. Skipped for packed values, where averaging across a
-      // category boundary is meaningless.
-      if (u_smooth > 0.0 && u_packed < 0.5) {
-        float acc = 0.0, wt = 0.0;
-        for (int dy = -1; dy <= 1; dy++) {
-          for (int dx = -1; dx <= 1; dx++) {
-            vec2 off = vec2(float(dx), float(dy)) * u_texel;
-            float sv = texture2D(u_data, o + off).a;
-            if (sv >= u_floor) { acc += sv; wt += 1.0; }
-          }
-        }
-        if (wt > 0.0) enc = mix(enc, acc / wt, u_smooth);
       }
 
       vec4 col = texture2D(u_ramp, vec2(enc, 0.5));
