@@ -1,8 +1,11 @@
 /* ============================================================================
-   MRMS-GL — GPU-rendered MRMS reflectivity for Mapbox GL JS
+   MRMS-GL — GPU-rendered MRMS radar for Mapbox GL JS
    ----------------------------------------------------------------------------
-   Live Storm Chasers.  Loaded from its own deployment; the host page only calls
-   MRMSGL.attach(map) and MRMSGL.detach().
+   Copyright (c) 2026 Live Storm Chasers Network LLC
+   MIT licensed. See LICENSE for terms; this notice must be retained.
+   ----------------------------------------------------------------------------
+   Loaded from its own deployment; the host page only calls MRMSGL.attach(map)
+   and MRMSGL.detach().
 
    WHY THIS EXISTS
    The previous renderer decoded the 7000x3500 MRMS grid, drew it once into an

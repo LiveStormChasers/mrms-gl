@@ -1,3 +1,8 @@
+/*!
+ * MRMS-GL — GPU-rendered MRMS radar for Mapbox GL JS
+ * Copyright (c) 2026 Live Storm Chasers Network LLC
+ * MIT licensed. See LICENSE for terms; this notice must be retained.
+ */
 /* ============================================================================
    MRMS-FETCH — pulls the MRMS grid and hands it to MRMSGL
    ----------------------------------------------------------------------------

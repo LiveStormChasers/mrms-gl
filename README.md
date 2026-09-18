@@ -3,6 +3,15 @@ MRMS-GL
 
 GPU-rendered MRMS radar for Mapbox GL JS.
 
+Copyright (c) 2026 Live Storm Chasers Network LLC. MIT licensed — see LICENSE.
+
+Free to use, modify and ship, including commercially. The one condition is that
+the copyright notice and licence text travel with it, so keep LICENSE in any
+copy and leave the header comment at the top of the source files intact.
+
+A visible credit is not required, but it is appreciated: "Radar rendering by
+MRMS-GL" with a link back to this repository.
+
 Decodes NOAA's MRMS grids in the browser and draws them on the GPU, sampling the
 raw grid per screen pixel rather than stretching a pre-rendered image.
 
