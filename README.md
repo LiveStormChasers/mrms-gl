@@ -8,7 +8,9 @@ Copyright (c) 2026 Live Storm Chasers Network LLC. All rights reserved.
 This code is published to be read, not taken. It is source-visible, not open
 source — see LICENSE. Read it, study it, quote it when discussing the techniques.
 Using it in a project needs written permission first, which is usually easy to
-get: ask.
+get: ask. Permission comes with terms, and attribution is always one of them —
+the notices stay in the source and a visible credit appears wherever the work
+is shown.
 
 None of that touches the data. NOAA's MRMS products are free to everyone and
 this repository makes no claim over them.

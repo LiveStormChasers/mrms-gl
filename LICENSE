@@ -22,6 +22,25 @@ You may NOT, without prior written permission from the copyright holder:
 Permission is granted case by case and is usually straightforward to obtain.
 Ask before using it rather than after.
 
+Where permission IS granted, it is granted on terms, and those terms always
+include attribution. Unless the written grant says otherwise:
+
+  - the copyright notice above, and this licence, must remain in the source
+  - the notice at the top of each source file must be left intact
+  - a visible credit must appear wherever the work is shown to people, reading
+    "Radar rendering by MRMS-GL, (c) Live Storm Chasers Network LLC" or wording
+    agreed in writing, with a link to this repository where a link is possible
+  - the credit may not be hidden, collapsed behind a menu or rendered
+    illegibly, and must not imply that Live Storm Chasers Network LLC endorses
+    or is responsible for the work it appears in
+
+A written grant may add conditions, narrow the scope to a named project, set a
+term, or require a fee. Permission granted for one project does not extend to
+another, and is not transferable.
+
+Failing to meet the terms ends the permission, and use after that point is
+unlicensed.
+
 Nothing here restricts the underlying public data. NOAA's MRMS products are
 free to everyone and this licence makes no claim over them; it covers only the
 code in this repository.

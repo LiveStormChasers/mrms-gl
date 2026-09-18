@@ -1,6 +1,14 @@
 /* ============================================================================
    MRMS-GL — what index.html adds
    ----------------------------------------------------------------------------
+   Copyright (c) 2026 Live Storm Chasers Network LLC.  All rights reserved.
+   Source-visible, not open source. See LICENSE — using this code requires
+   written permission.
+
+   This file in particular is meant to be READ rather than pasted. It shows the
+   shape of the integration; copying it into another project still needs
+   permission first.
+   ----------------------------------------------------------------------------
    Paste this inside the existing Radar module (or next to it). The renderer and
    the fetcher live at their own URL, so index.html grows by this much and no
    more; fixing the renderer later means redeploying that repo, not this file.
