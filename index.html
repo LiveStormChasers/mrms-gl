@@ -69,6 +69,16 @@
   <label>No-data weight <span id="nVal">0.00</span></label>
   <input type="range" id="nodata" min="0" max="100" value="0">
 
+  <label>Smoothing <span id="sVal">0.00</span></label>
+  <input type="range" id="smooth" min="0" max="100" step="5" value="0">
+
+  <label>Loop speed <span id="spVal">5x</span></label>
+  <input type="range" id="speedR" min="0" max="6" step="1" value="2">
+
+  <label><input type="checkbox" id="blendChk" checked> Frame blending</label>
+
+  <button id="loopBtn">Loop 12 frames</button>
+
   <button id="reload">Reload frame</button>
   <button id="toggle">Hide radar</button>
 </div>
@@ -222,6 +232,47 @@ $('nodata').addEventListener('input', e => {
   const v = e.target.value / 100;
   MRMSGL.setNodataWeight(v);
   $('nVal').textContent = v.toFixed(2);
+});
+
+// Spatial smoothing, live. Below about a third it tidies interior contours;
+// above that it starts costing real detail.
+$('smooth').addEventListener('input', e => {
+  const v = Number(e.target.value) / 100;
+  $('sVal').textContent = v.toFixed(2);
+  MRMSGL.setSmooth(v);
+});
+
+// Speed, using the same steps the reference renderer offers.
+const SPEEDS = [20, 10, 5, 4, 3, 2, 1];
+$('speedR').addEventListener('input', e => {
+  const sp = SPEEDS[Number(e.target.value)];
+  $('spVal').textContent = sp + 'x';
+  MRMSGL.setSpeed(sp);
+});
+
+$('blendChk').addEventListener('change', e => MRMSGL.setBlend(e.target.checked));
+
+$('loopBtn').addEventListener('click', async () => {
+  const btn = $('loopBtn');
+  if (MRMSGL.isLooping()) {
+    MRMSGL.stopLoop();
+    btn.textContent = 'Loop 12 frames';
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const frames = await MRMSFetch.loadSeries(12, (f, i, n) => {
+      btn.textContent = `Loading ${i}/${n}`;
+    });
+    if (frames.length < 2) { btn.textContent = 'Not enough frames'; return; }
+    MRMSGL.setFrames(frames);
+    MRMSGL.startLoop();
+    btn.textContent = 'Stop loop';
+  } catch (err) {
+    btn.textContent = 'Failed: ' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 $('reload').addEventListener('click', async () => {
