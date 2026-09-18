@@ -682,12 +682,16 @@
         float nb = texture2D(u_next, o + vec2(u_texel.x, 0.0)).a;
         float nc = texture2D(u_next, o + vec2(0.0, u_texel.y)).a;
         float nd = texture2D(u_next, o + u_texel).a;
-        // An empty cell must not drag a real value toward zero, so where one
-        // side has nothing the other stands alone.
-        a = (a < 0.002) ? na : ((na < 0.002) ? a : mix(a, na, u_blend));
-        b = (b < 0.002) ? nb : ((nb < 0.002) ? b : mix(b, nb, u_blend));
-        c = (c < 0.002) ? nc : ((nc < 0.002) ? c : mix(c, nc, u_blend));
-        d = (d < 0.002) ? nd : ((nd < 0.002) ? d : mix(d, nd, u_blend));
+        // Empty takes part in the blend like any other value. An earlier version
+        // held a real value whenever the other side was empty, meaning an echo
+        // appeared at full strength the instant the next frame had it and never
+        // faded where the next frame did not — so it grew at the leading edge and
+        // refused to shrink at the trailing one. The result smeared instead of
+        // dissolving. Letting empty participate makes the fade symmetric.
+        a = mix(a, na, u_blend);
+        b = mix(b, nb, u_blend);
+        c = mix(c, nc, u_blend);
+        d = mix(d, nd, u_blend);
       }
 
       float ha = step(u_floor, a), hb = step(u_floor, b);
@@ -859,7 +863,10 @@
         }
         const t = now - this._stepStart;
         const onNewest = this._frameIndex === this._frames.length - 1;
-        const span = onNewest ? dwell : gap;
+        // 5x is the reference, so the defaults hold at the middle of the scale
+        // rather than at one end of it.
+        const k = 5 / (this._speed || 5);
+        const span = (onNewest ? dwell : gap) * k;
 
         if (t >= span) {
           this.showFrame(this._frameIndex + 1);
@@ -897,9 +904,25 @@
       this._raf = requestAnimationFrame(tick);
     },
 
-    // Frame blending, off by default so a caller opts in rather than inherits it.
+    // Frame blending, on by default. A caller can turn it off to step.
     setBlend(on) { this._blendOn = !!on; if (!on) this._blend = 0; },
     _blendOn: true,
+
+    // Playback speed as a multiplier, where a larger number is faster — the same
+    // sense as the familiar 20x, 10x, 5x, ... , 1x scale. 1x is close to real
+    // time for a two-minute cadence and slow enough to study; 20x is a quick
+    // sweep of the whole window. Changing it takes effect on the next step
+    // rather than restarting the loop, so the picture does not jump.
+    SPEEDS: [20, 10, 5, 4, 3, 2, 1],
+    _speed: 5,
+
+    setSpeed(x) {
+      const n = Number(x);
+      if (!isFinite(n) || n <= 0) return false;
+      this._speed = n;
+      return true;
+    },
+    speed() { return this._speed; },
 
     stopLoop() {
       if (this._loopTimer) { clearTimeout(this._loopTimer); this._loopTimer = null; }
