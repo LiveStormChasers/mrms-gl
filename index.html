@@ -72,6 +72,9 @@
   <label>Smoothing <span id="sVal">0.80</span></label>
   <input type="range" id="smooth" min="0" max="100" step="5" value="80">
 
+  <label>Frame spacing <span id="stVal">2 min</span></label>
+  <input type="range" id="stepR" min="1" max="4" step="1" value="1">
+
   <label>Loop speed <span id="spVal">5x</span></label>
   <input type="range" id="speedR" min="0" max="6" step="1" value="2">
 
@@ -252,6 +255,14 @@ $('speedR').addEventListener('input', e => {
 
 $('blendChk').addEventListener('change', e => MRMSGL.setBlend(e.target.checked));
 
+// How many published frames to skip between played ones. MRMS publishes every
+// two minutes, so step 2 shows every other frame and covers twice the time.
+let loopStep = 1;
+$('stepR').addEventListener('input', e => {
+  loopStep = Number(e.target.value);
+  $('stVal').textContent = (loopStep * 2) + ' min';
+});
+
 $('loopBtn').addEventListener('click', async () => {
   const btn = $('loopBtn');
   if (MRMSGL.isLooping()) {
@@ -261,13 +272,13 @@ $('loopBtn').addEventListener('click', async () => {
   }
   btn.disabled = true;
   try {
-    const frames = await MRMSFetch.loadSeries(12, (f, i, n) => {
+    const frames = await MRMSFetch.loadSeries(12, loopStep, (f, i, n) => {
       btn.textContent = `Loading ${i}/${n}`;
     });
     if (frames.length < 2) { btn.textContent = 'Not enough frames'; return; }
     MRMSGL.setFrames(frames);
     MRMSGL.startLoop();
-    btn.textContent = 'Stop loop';
+    btn.textContent = `Stop loop (${frames.length} frames, ${frames.length * loopStep * 2} min)`;
   } catch (err) {
     btn.textContent = 'Failed: ' + err.message;
   } finally {

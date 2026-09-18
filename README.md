@@ -27,7 +27,8 @@ Files
 
   mrms-gl.js      the renderer. Exposes MRMSGL.
   mrms-fetch.js   fetch and decode. Exposes MRMSFetch.
-  index.html      standalone bench for development.
+  index.html      standalone bench, with live controls for smoothing, loop
+                  speed, frame blending and a twelve-frame loop.
 
 
 Use
@@ -127,6 +128,20 @@ Things that cost time and are worth carrying
    almost the entire field, because real shear sits at bytes where 5 dBZ would
    be noise.
 
+9. The colour ramp is sampled LINEAR and the palette carries a stop per half
+   decibel — one per encoded byte. Those two go together. A coarser table
+   stretched over 256 texels repeats colours, and then LINEAR has room to smear
+   every boundary while NEAREST shows each repeat as a contour ring inside a
+   slowly varying core. With a stop per value neither happens. Changing one
+   without the other brings back whichever artefact the other was hiding.
+
+10. The decode runs in a pool of four workers, built from a Blob so the module
+    stays self-contained. Unfiltering a 14000x7000 PNG is about 650 ms of tight
+    loop; on the main thread that is 650 ms where the map does not move. The
+    buffers are transferred rather than copied, because a 98 MB grid would
+    otherwise be duplicated twice per frame. It falls back to decoding inline
+    where a content security policy blocks Blob workers.
+
 
 The edge treatment, and three wrong versions of it
 --------------------------------------------------
@@ -149,6 +164,45 @@ alpha, so an edge softens by going transparent rather than by changing hue.
 
 Separately, the colour ramp is sampled LINEAR. The data is quantised to half a
 decibel per byte and NEAREST made those steps show as contour banding.
+
+
+Loop
+----
+
+loadSeries(n, onFrame) fetches a run of frames and setFrames/startLoop plays
+them. Frames are held as decoded byte arrays rather than GPU textures — a dozen
+14000x7000 textures is over a gigabyte of VRAM and the context is lost, while the
+same frames as arrays upload in about 20 ms each.
+
+Decoded frames are cached by product and timestamp, so a second loop over the
+same window costs almost nothing. Measured: about 4 s cold for twelve
+reflectivity frames, about 1 s warm.
+
+startLoop runs on requestAnimationFrame, so it stops in a background tab without
+being asked. Measured timing at 5x: 305 ms steps with 2 ms jitter, and the blend
+ramps smoothly at 144 fps. Nothing in the playback stutters.
+
+What does read as stutter is the data. MRMS publishes every two minutes, so a
+loop is a sequence of discrete states, not motion. Blending cross-fades between
+them, which dissolves rather than moves; with it off they step. Neither is
+movement, because the frames contain positions and not velocities. Real movement
+needs advection — estimating the shift between frames and warping the field along
+it — which is a genuine piece of work and misbehaves when storms grow or decay
+rather than travel.
+
+loadSeries(count, step) controls spacing. MRMS publishes every two minutes, so
+step 1 plays twelve frames over 24 minutes and step 2 plays twelve over 48. Wider
+spacing covers more ground per step, which reads faster at the same playback
+speed and suits watching a system travel; tight spacing suits watching one storm
+develop. Neither is more correct.
+
+This came from a measurement worth keeping: a reference renderer playing what it
+labels the same two-minute product stepped its clock five minutes per frame, so
+it was showing roughly every other frame. That is why its loop reads faster at
+the same nominal speed — more weather per step, not a higher frame rate.
+
+The selection always ends on the newest frame and returns what exists rather than
+failing, so a wide step against a short listing simply yields fewer frames.
 
 
 The rotation scale
@@ -213,11 +267,12 @@ Tables declaring units other than dBZ are refused rather than applied.
 Not done
 --------
 
-No loop. The proxy serves only the newest frame: latest.bin ignores a timestamp
-parameter and a per-timestamp path is a 404. The list endpoint reports which
-runs exist upstream but none can be fetched. A loop needs a route that accepts a
-timestamp, or the worker retaining recent frames.
-
 The rotation scale has not been seen during an actual tornado warning. It is
 anchored to published thresholds, but how it reads on a significant event is
 untested.
+
+Snow has never been drawn. Precipitation type separates rain from snow, and in
+September every frame is rain, so the snow band is unexercised until winter.
+
+Smoothing is a plain 3x3 mean. It works, but it softens the whole field rather
+than only the edges, which is why the default is modest rather than high.

@@ -471,8 +471,25 @@
     clearCache() { this._cache.clear(); },
     cacheSize() { return this._cache.size; },
 
-    async loadSeries(count, onFrame) {
-      const stamps = (await this.times()).slice(-count);
+    // count is how many frames to play; step is how many published frames to
+    // advance between them. MRMS publishes every two minutes, so step 1 gives a
+    // 24 minute window over 12 frames and step 2 gives 48. Wider spacing covers
+    // more ground per step, which reads faster at the same playback speed and
+    // suits watching a system travel; tight spacing suits watching one storm
+    // develop. Neither is more correct.
+    async loadSeries(count, step, onFrame) {
+      // Tolerate the old two-argument form, where the second was the callback.
+      if (typeof step === 'function') { onFrame = step; step = 1; }
+      step = Math.max(1, Math.floor(step || 1));
+      // Take every step-th frame, newest last. The listing is capped upstream, so
+      // a wide step with a high count simply returns what is available rather
+      // than failing.
+      const all = await this.times();
+      const picked = [];
+      for (let i = all.length - 1; i >= 0 && picked.length < count; i -= step) {
+        picked.unshift(all[i]);
+      }
+      const stamps = picked;
 
       // Run a few at a time rather than one after another. With the decode in
       // workers the limit is no longer the main thread, so the wall clock drops
