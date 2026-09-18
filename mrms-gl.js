@@ -644,6 +644,8 @@
   const FRAG = `
     precision highp float;
     uniform sampler2D u_data;
+    uniform sampler2D u_next;     // the frame being crossed into
+    uniform float u_blend;        // 0 = current frame only, 1 = fully the next
     uniform sampler2D u_ramp;
     uniform float u_opacity;
     uniform vec4 u_bounds;        // mercX west, mercX east, lat north, lat south
@@ -668,6 +670,25 @@
       float b = texture2D(u_data, o + vec2(u_texel.x, 0.0)).a;
       float c = texture2D(u_data, o + vec2(0.0, u_texel.y)).a;
       float d = texture2D(u_data, o + u_texel).a;
+
+      // Frame blending. MRMS publishes every two minutes, so a loop is a
+      // slideshow unless consecutive frames are crossed into one another. The
+      // blend happens on the VALUE, before the colour lookup, so a cell fading
+      // from 20 to 40 dBZ passes through 30 and its real colour — blending the
+      // two colours instead would cross the palette in a straight line and
+      // invent shades that are not on the scale.
+      if (u_blend > 0.0) {
+        float na = texture2D(u_next, o).a;
+        float nb = texture2D(u_next, o + vec2(u_texel.x, 0.0)).a;
+        float nc = texture2D(u_next, o + vec2(0.0, u_texel.y)).a;
+        float nd = texture2D(u_next, o + u_texel).a;
+        // An empty cell must not drag a real value toward zero, so where one
+        // side has nothing the other stands alone.
+        a = (a < 0.002) ? na : ((na < 0.002) ? a : mix(a, na, u_blend));
+        b = (b < 0.002) ? nb : ((nb < 0.002) ? b : mix(b, nb, u_blend));
+        c = (c < 0.002) ? nc : ((nc < 0.002) ? c : mix(c, nc, u_blend));
+        d = (d < 0.002) ? nd : ((nd < 0.002) ? d : mix(d, nd, u_blend));
+      }
 
       float ha = step(u_floor, a), hb = step(u_floor, b);
       float hc = step(u_floor, c), hd = step(u_floor, d);
@@ -734,7 +755,8 @@
     VERSION,
     id: 'lsc-mrms-gl',
     _map: null, _gl: null, _prog: null, _buf: null,
-    _dataTex: null, _rampTex: null, _bounds: null,
+    _dataTex: null, _nextTex: null, _rampTex: null, _bounds: null,
+    _pendingNext: null, _blend: 0,
     _pending: null, _opacity: 0.9, _attached: false,
     _texel: null,
     _Ni: FALLBACK_NI, _Nj: FALLBACK_NJ, _kind: 'dbz',
@@ -818,26 +840,76 @@
     startLoop(ms, dwellMs, onFrame) {
       this.stopLoop();
       if (this._frames.length < 2) return false;
-      const gap = ms || 400;
-      const dwell = dwellMs || 1200;
-      const step = () => {
-        this.showFrame(this._frameIndex + 1);
-        if (onFrame) onFrame(this._frameIndex, this._frames.length,
-                             this._frames[this._frameIndex]);
-        // Pause on the newest frame, not on the one before it. Without this the
-        // loop reads as a blur and the current state is the hardest to see.
+      // 300ms between frames and 1600ms on the newest, matching what reads well
+      // on a two-minute cadence: an eight frame loop becomes a two and a half
+      // second cycle with a beat on the current state.
+      const gap = ms || 300;
+      const dwell = dwellMs || 1600;
+
+      // MRMS publishes every two minutes, so twelve frames stepped one to the
+      // next is a slideshow — storms jump rather than move. Each step is instead
+      // animated: the current frame is crossed into the following one across the
+      // gap, so the field morphs. The dwell on the newest frame is not blended,
+      // because that pause is the point at which the viewer reads the present.
+      const tick = (now) => {
+        this._raf = null;
+        if (typeof document !== 'undefined' && document.hidden) {
+          this._loopTimer = setTimeout(() => this._resume(tick), 1000);
+          return;
+        }
+        const t = now - this._stepStart;
         const onNewest = this._frameIndex === this._frames.length - 1;
-        this._loopTimer = setTimeout(step, onNewest ? dwell : gap);
+        const span = onNewest ? dwell : gap;
+
+        if (t >= span) {
+          this.showFrame(this._frameIndex + 1);
+          this._blend = 0;
+          this._queueNext();
+          if (onFrame) onFrame(this._frameIndex, this._frames.length,
+                               this._frames[this._frameIndex]);
+          this._stepStart = now;
+        } else if (!onNewest && this._blendOn) {
+          // Ease rather than a straight ramp, so the change is gentlest at the
+          // moment each frame is most readable.
+          const x = t / span;
+          this._blend = x * x * (3 - 2 * x);
+          if (this._map) this._map.triggerRepaint();
+        }
+        this._raf = requestAnimationFrame(tick);
       };
-      this._loopTimer = setTimeout(step, ms || 400);
+
+      this._stepStart = performance.now();
+      this._blend = 0;
+      this._queueNext();
+      this._raf = requestAnimationFrame(tick);
       return true;
     },
 
-    stopLoop() {
-      if (this._loopTimer) { clearTimeout(this._loopTimer); this._loopTimer = null; }
+    // Hand the following frame to the shader so it has something to cross into.
+    _queueNext() {
+      if (!this._blendOn || this._frames.length < 2) { this._pendingNext = null; return; }
+      const nxt = this._frames[(this._frameIndex + 1) % this._frames.length];
+      this._pendingNext = nxt && nxt.data ? nxt.data : null;
     },
 
-    isLooping() { return !!this._loopTimer; },
+    _resume(tick) {
+      this._stepStart = performance.now();
+      this._raf = requestAnimationFrame(tick);
+    },
+
+    // Frame blending, off by default so a caller opts in rather than inherits it.
+    setBlend(on) { this._blendOn = !!on; if (!on) this._blend = 0; },
+    _blendOn: true,
+
+    stopLoop() {
+      if (this._loopTimer) { clearTimeout(this._loopTimer); this._loopTimer = null; }
+      if (this._raf) { cancelAnimationFrame(this._raf); this._raf = null; }
+      this._blend = 0;
+      this._pendingNext = null;
+      if (this._map) this._map.triggerRepaint();
+    },
+
+    isLooping() { return !!(this._loopTimer || this._raf); },
 
     kind() { return this._kind; },
     gridSize() { return [this._Ni, this._Nj]; },
@@ -864,6 +936,24 @@
     setFeather(x) {
       this._feather = Math.max(0, Math.min(1, x));
       if (this._map) this._map.triggerRepaint();
+    },
+
+    _uploadNext(gl) {
+      const bytes = this._pendingNext;
+      this._pendingNext = null;
+      if (!this._nextTex) {
+        this._nextTex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this._nextTex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      } else {
+        gl.bindTexture(gl.TEXTURE_2D, this._nextTex);
+      }
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.ALPHA, this._Ni, this._Nj, 0,
+                    gl.ALPHA, gl.UNSIGNED_BYTE, bytes);
     },
 
     _uploadData(gl) {
@@ -931,6 +1021,7 @@
     render(gl, matrix) {
       if (!this._prog) return;
       if (this._pending) this._uploadData(gl);
+      if (this._pendingNext) this._uploadNext(gl);
       if (!this._dataTex) return;
 
       gl.useProgram(this._prog);
@@ -948,6 +1039,8 @@
                    this._floorOverride !== null ? this._floorOverride
                                                 : (this._floors[this._kind] || this._floors.dbz));
       gl.uniform1f(gl.getUniformLocation(this._prog, 'u_feather'), this._feather);
+      gl.uniform1f(gl.getUniformLocation(this._prog, 'u_blend'),
+                   this._nextTex ? this._blend : 0);
       gl.uniform1f(gl.getUniformLocation(this._prog, 'u_packed'),
                    this._kind === 'ptyperefl' ? 1 : 0);
 
@@ -959,6 +1052,12 @@
       gl.bindTexture(gl.TEXTURE_2D, this._rampTex);
       gl.uniform1i(gl.getUniformLocation(this._prog, 'u_ramp'), 1);
 
+      // The second frame always has to be bound, even when not blending — an
+      // unbound sampler reads as black on some drivers and the field flickers.
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, this._nextTex || this._dataTex);
+      gl.uniform1i(gl.getUniformLocation(this._prog, 'u_next'), 2);
+
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -966,6 +1065,8 @@
 
     onRemove(map, gl) {
       if (this._dataTex) gl.deleteTexture(this._dataTex);
+      if (this._nextTex) gl.deleteTexture(this._nextTex);
+      this._nextTex = null;
       if (this._rampTex) gl.deleteTexture(this._rampTex);
       if (this._buf) gl.deleteBuffer(this._buf);
       if (this._prog) gl.deleteProgram(this._prog);
