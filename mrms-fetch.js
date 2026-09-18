@@ -120,6 +120,104 @@
     return rows;
   }
 
+  // ---------------------------------------------------------------------------
+  // Decode pool
+  //
+  // Unfiltering a 14000x7000 PNG is about 650 ms of tight loop. On the main
+  // thread that is 650 ms where the map does not pan, zoom or repaint, and a
+  // loop of a dozen frames freezes the page for eight seconds.
+  //
+  // The decode touches no DOM and no network — it takes bytes and returns bytes
+  // — so it moves into workers unchanged. A pool also decodes frames in
+  // parallel, so a series gets faster as well as smoother.
+  //
+  // The worker source is built from a Blob rather than shipped as a second file,
+  // so the module stays self-contained and carries no URL of its own.
+  // ---------------------------------------------------------------------------
+  const WORKER_SRC = `
+    ${pngBitDepth.toString()}
+    ${idatOf.toString()}
+    ${inflate.toString()}
+    ${unfilter.toString()}
+    ${encode.toString()}
+
+    self.onmessage = async (e) => {
+      const { id, png, Ni, Nj, R, E, D, kind } = e.data;
+      try {
+        const bpp = pngBitDepth(png) === 8 ? 1 : 2;
+        const rows = unfilter(await inflate(idatOf(png)), Ni, Nj, bpp);
+        const scale = Math.pow(10, D), ef = Math.pow(2, E);
+        const out = new Uint8Array(Ni * Nj);
+        let k = 0;
+        for (let j = 0; j < Nj; j++) {
+          const row = rows[j];
+          for (let i = 0; i < Ni; i++) {
+            const v = bpp === 1 ? row[i] : (row[i * 2] << 8) | row[i * 2 + 1];
+            out[k++] = encode((R + v * ef) / scale, kind);
+          }
+        }
+        self.postMessage({ id, out }, [out.buffer]);
+      } catch (err) {
+        self.postMessage({ id, error: err.message });
+      }
+    };
+  `;
+
+  const Pool = {
+    // Four is enough to saturate the network and keep a core free for the map.
+    SIZE: 4,
+    _workers: null, _next: 0, _seq: 0, _pending: new Map(),
+
+    available() {
+      return typeof Worker !== 'undefined' && typeof Blob !== 'undefined';
+    },
+
+    _spawn() {
+      if (this._workers) return true;
+      if (!this.available()) return false;
+      try {
+        const url = URL.createObjectURL(new Blob([WORKER_SRC], { type: 'text/javascript' }));
+        this._workers = [];
+        for (let i = 0; i < this.SIZE; i++) {
+          const w = new Worker(url);
+          w.onmessage = (e) => {
+            const job = this._pending.get(e.data.id);
+            if (!job) return;
+            this._pending.delete(e.data.id);
+            e.data.error ? job.reject(new Error(e.data.error)) : job.resolve(e.data.out);
+          };
+          this._workers.push(w);
+        }
+        URL.revokeObjectURL(url);
+        return true;
+      } catch (e) {
+        // Blob workers are blocked by some content security policies. Fall back
+        // to decoding inline rather than failing outright.
+        this._workers = null;
+        return false;
+      }
+    },
+
+    decode(png, Ni, Nj, R, E, D, kind) {
+      if (!this._spawn()) return null;          // caller decodes inline instead
+      const id = ++this._seq;
+      const w = this._workers[this._next++ % this.SIZE];
+      return new Promise((resolve, reject) => {
+        this._pending.set(id, { resolve, reject });
+        // The buffer is transferred, not copied — a 98 MB grid would otherwise
+        // be duplicated on the way in and again on the way out.
+        w.postMessage({ id, png, Ni, Nj, R, E, D, kind }, [png.buffer]);
+      });
+    },
+
+    terminate() {
+      if (!this._workers) return;
+      this._workers.forEach(w => w.terminate());
+      this._workers = null;
+      this._pending.clear();
+    }
+  };
+
   const MRMSFetch = {
     // Set this before first use. It must point at a proxy that serves
     // /mrms/latest.bin and /mrms/list, returning the raw PNG from GRIB2
@@ -229,6 +327,39 @@
       return this._readPhysical(res, product);
     },
 
+    // Decode straight to the encoded bytes the renderer wants, in a worker when
+    // one is available. This is the path every product takes except ptypeRefl,
+    // which composes two grids and therefore needs the physical values first.
+    async _readEncoded(res, product) {
+      const kind = res.headers.get('x-kind') || 'dbz';
+      const g = (res.headers.get('x-grid') || '').match(/^(\d+)x(\d+)$/);
+      const Ni = g ? +g[1] : DEFAULT_NI;
+      const Nj = g ? +g[2] : DEFAULT_NJ;
+      const [R, E, D] = (res.headers.get('x-scale') || '-9990,0,1').split(',').map(Number);
+      const modified = res.headers.get('x-modified') || null;
+      const png = new Uint8Array(await res.arrayBuffer());
+
+      const viaPool = Pool.decode(png, Ni, Nj, R, E, D, kind);
+      if (viaPool) {
+        return { data: await viaPool, Ni, Nj, kind, modified };
+      }
+
+      // No worker available — same work, on this thread.
+      const BPP = pngBitDepth(png) === 8 ? 1 : 2;
+      const rows = unfilter(await inflate(idatOf(png)), Ni, Nj, BPP);
+      const scale = Math.pow(10, D), ef = Math.pow(2, E);
+      const data = new Uint8Array(Ni * Nj);
+      let k = 0;
+      for (let j = 0; j < Nj; j++) {
+        const row = rows[j];
+        for (let i = 0; i < Ni; i++) {
+          const v = BPP === 1 ? row[i] : (row[i * 2] << 8) | row[i * 2 + 1];
+          data[k++] = encode((R + v * ef) / scale, kind);
+        }
+      }
+      return { data, Ni, Nj, kind, modified };
+    },
+
     async load() {
       // ptypeRefl is not a product the worker serves — it is built here from two
       // that it does. The Fox Weather palette wants reflectivity shaded inside a
@@ -236,11 +367,18 @@
       // category with no intensity, SeamlessHSR the intensity with no category.
       if (this._product === 'ptyperefl') return this._loadPtypeRefl();
 
-      const f = await this._fetchPhysical(this._product);
+      if (!this.WORKER) {
+        throw new Error('MRMSFetch.WORKER is not set — point it at your proxy before use');
+      }
+      const res = await fetch(`${this.WORKER}/mrms/latest.bin?product=${this._product}&t=${Date.now()}`);
+      if (!res.ok) throw new Error(`MRMS ${this._product} HTTP ${res.status}`);
+      const kindHdr = res.headers.get('x-kind');
+      if (kindHdr && kindHdr !== 'dbz' && kindHdr !== 'shear' && kindHdr !== 'mesh') {
+        throw new Error(`Product "${this._product}" is ${kindHdr} data`);
+      }
+      const f = await this._readEncoded(res, this._product);
       this._lastModified = f.modified;
-      const out = new Uint8Array(f.Ni * f.Nj);
-      for (let i = 0; i < out.length; i++) out[i] = encode(f.phys[i], f.kind);
-      return { data: out, Ni: f.Ni, Nj: f.Nj, kind: f.kind, product: this._product };
+      return { data: f.data, Ni: f.Ni, Nj: f.Nj, kind: f.kind, product: this._product };
     },
 
     // Combine PrecipFlag and SeamlessHSR into the category*100 + dBZ field the
@@ -293,10 +431,10 @@
         ]);
         return this._composePtype(flag, refl);
       }
-      const f = await this._fetchPhysicalAt(this._product, stamp);
-      const out = new Uint8Array(f.Ni * f.Nj);
-      for (let i = 0; i < out.length; i++) out[i] = encode(f.phys[i], f.kind);
-      return { data: out, Ni: f.Ni, Nj: f.Nj, kind: f.kind, product: this._product, stamp };
+      const res = await fetch(`${this.WORKER}/mrms/frame/${stamp}.bin?product=${this._product}`);
+      if (!res.ok) throw new Error(`MRMS ${this._product} ${stamp} HTTP ${res.status}`);
+      const f = await this._readEncoded(res, this._product);
+      return { data: f.data, Ni: f.Ni, Nj: f.Nj, kind: f.kind, product: this._product, stamp };
     },
 
     // Load a run of frames, newest last, reporting progress as each arrives.
@@ -304,21 +442,71 @@
     // grids in parallel is 1.2 GB of decode competing for one main thread, and
     // the browser stops painting. Sequential is slower to finish and stays
     // usable throughout, which matters more.
+    // Decoded frames, keyed product+stamp. A historic frame never changes, so a
+    // second loop over the same window costs nothing — which is the difference
+    // between a loop that starts instantly and one that spends nine seconds
+    // refetching what it already had.
+    //
+    // Capped because these are large: a 14000x7000 frame is 98 MB, so twelve of
+    // them is over a gigabyte. Oldest out first.
+    _cache: new Map(),
+    CACHE_MAX: 10,
+
+    _cacheGet(key) {
+      const hit = this._cache.get(key);
+      if (hit) {                       // refresh recency
+        this._cache.delete(key);
+        this._cache.set(key, hit);
+      }
+      return hit;
+    },
+
+    _cachePut(key, frame) {
+      this._cache.set(key, frame);
+      while (this._cache.size > this.CACHE_MAX) {
+        this._cache.delete(this._cache.keys().next().value);
+      }
+    },
+
+    clearCache() { this._cache.clear(); },
+    cacheSize() { return this._cache.size; },
+
     async loadSeries(count, onFrame) {
       const stamps = (await this.times()).slice(-count);
-      const frames = [];
-      for (const stamp of stamps) {
-        try {
-          const f = await this.loadAt(stamp);
-          frames.push(f);
-          if (onFrame) onFrame(f, frames.length, stamps.length);
-        } catch (e) {
-          // A missing frame is normal — NOAA prunes while we are reading the
-          // listing. Skip it rather than abandoning the whole loop.
-          if (global.console) console.warn('[MRMS] frame', stamp, e.message);
+
+      // Run a few at a time rather than one after another. With the decode in
+      // workers the limit is no longer the main thread, so the wall clock drops
+      // roughly by the width of this window. It is not unlimited: every frame in
+      // flight is a full grid held in memory, and a dozen 14000x7000 grids at
+      // once is over a gigabyte.
+      const WIDTH = Pool.available() ? 4 : 1;
+      const frames = new Array(stamps.length);
+      let done = 0, cursor = 0;
+
+      const runOne = async () => {
+        while (cursor < stamps.length) {
+          const idx = cursor++;
+          const stamp = stamps[idx];
+          try {
+            const key = this._product + '@' + stamp;
+            const cached = this._cacheGet(key);
+            const f = cached || await this.loadAt(stamp);
+            if (!cached) this._cachePut(key, f);
+            frames[idx] = f;
+            if (onFrame) onFrame(f, ++done, stamps.length);
+          } catch (e) {
+            // A missing frame is normal — NOAA prunes while the listing is read.
+            // Skip it rather than abandoning the whole loop.
+            done++;
+            if (typeof console !== 'undefined') console.warn('[MRMS] frame', stamp, e.message);
+          }
         }
-      }
-      return frames;
+      };
+
+      await Promise.all(Array.from({ length: WIDTH }, runOne));
+      // Holes where a frame failed are dropped, and order is preserved because
+      // each result went into its own slot rather than being pushed on arrival.
+      return frames.filter(Boolean);
     },
 
 
