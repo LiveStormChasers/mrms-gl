@@ -1,16 +1,30 @@
-MIT License
-
 Copyright (c) 2026 Live Storm Chasers Network LLC
+All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This source code is published so that it can be read, studied and referred to.
+It is NOT open source, and no licence to use it is granted by its publication
+here.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+You may:
+
+  - read this code
+  - study how it works
+  - quote short excerpts when discussing or teaching the techniques in it,
+    with attribution
+
+You may NOT, without prior written permission from the copyright holder:
+
+  - use this code, in whole or in substantial part, in any project
+  - copy, modify, merge, publish, distribute, sublicense or sell it
+  - host, deploy or run it as part of any service, commercial or otherwise
+  - incorporate it into another work, including a derivative renderer
+
+Permission is granted case by case and is usually straightforward to obtain.
+Ask before using it rather than after.
+
+Nothing here restricts the underlying public data. NOAA's MRMS products are
+free to everyone and this licence makes no claim over them; it covers only the
+code in this repository.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
