@@ -653,6 +653,7 @@
     uniform float u_floor;        // minimum encoded value to draw at all
     uniform float u_feather;      // 0 = hard edges, 1 = coverage fades alpha
     uniform float u_packed;       // 1 when the value packs a category, 0 otherwise
+    uniform float u_smooth;       // 0 = none, 1 = full neighbourhood average
     varying vec2 v_merc;
     void main() {
       float u = (v_merc.x - u_bounds.x) / (u_bounds.y - u_bounds.x);
@@ -729,6 +730,24 @@
               : ((f.y < 0.5) ? b : d);
           if (enc <= u_floor) discard;
         }
+      }
+
+      // Spatial smoothing. Sampling four cells gives a hard-edged field, and a
+      // two-minute step between hard edges reads as a jump however the timing is
+      // tuned. Widening the neighbourhood softens the edges, so consecutive
+      // frames differ less abruptly — it does not change the data, only how
+      // sharply it is drawn. Skipped for packed values, where averaging across a
+      // category boundary is meaningless.
+      if (u_smooth > 0.0 && u_packed < 0.5) {
+        float acc = 0.0, wt = 0.0;
+        for (int dy = -1; dy <= 1; dy++) {
+          for (int dx = -1; dx <= 1; dx++) {
+            vec2 off = vec2(float(dx), float(dy)) * u_texel;
+            float sv = texture2D(u_data, o + off).a;
+            if (sv >= u_floor) { acc += sv; wt += 1.0; }
+          }
+        }
+        if (wt > 0.0) enc = mix(enc, acc / wt, u_smooth);
       }
 
       vec4 col = texture2D(u_ramp, vec2(enc, 0.5));
@@ -848,7 +867,11 @@
       // on a two-minute cadence: an eight frame loop becomes a two and a half
       // second cycle with a beat on the current state.
       const gap = ms || 300;
-      const dwell = dwellMs || 1600;
+      // The hold on the newest frame is capped relative to the step. At 10x a
+      // fixed 1600ms hold is ten steps long and the wrap reads as a stall rather
+      // than a beat, which is the thing that makes a loop feel stuttery at the
+      // restart. Three steps is enough to register the present frame.
+      const dwell = dwellMs || 0;
 
       // MRMS publishes every two minutes, so twelve frames stepped one to the
       // next is a slideshow — storms jump rather than move. Each step is instead
@@ -866,7 +889,8 @@
         // 5x is the reference, so the defaults hold at the middle of the scale
         // rather than at one end of it.
         const k = 5 / (this._speed || 5);
-        const span = (onNewest ? dwell : gap) * k;
+        const stepMs = gap * k;
+        const span = onNewest ? (dwell ? dwell * k : stepMs * 3) : stepMs;
 
         if (t >= span) {
           this.showFrame(this._frameIndex + 1);
@@ -907,6 +931,17 @@
     // Frame blending, on by default. A caller can turn it off to step.
     setBlend(on) { this._blendOn = !!on; if (!on) this._blend = 0; },
     _blendOn: true,
+
+    // Spatial smoothing, 0 to 1. This is the lever that makes a loop read
+    // smoothly: frame count only lengthens the loop, and cross-fading only
+    // dissolves. Softening the edges is what stops a two-minute step looking
+    // like a jump.
+    _smooth: 0.5,
+    setSmooth(x) {
+      this._smooth = Math.max(0, Math.min(1, Number(x) || 0));
+      if (this._map) this._map.triggerRepaint();
+    },
+    smooth() { return this._smooth; },
 
     // Playback speed as a multiplier, where a larger number is faster — the same
     // sense as the familiar 20x, 10x, 5x, ... , 1x scale. 1x is close to real
@@ -1066,6 +1101,7 @@
                    this._nextTex ? this._blend : 0);
       gl.uniform1f(gl.getUniformLocation(this._prog, 'u_packed'),
                    this._kind === 'ptyperefl' ? 1 : 0);
+      gl.uniform1f(gl.getUniformLocation(this._prog, 'u_smooth'), this._smooth);
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this._dataTex);
