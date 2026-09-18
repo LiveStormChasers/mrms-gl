@@ -189,6 +189,12 @@
       }
       const res = await fetch(`${this.WORKER}/mrms/latest.bin?product=${product}&t=${Date.now()}`);
       if (!res.ok) throw new Error(`MRMS ${product} HTTP ${res.status}`);
+      return this._readPhysical(res, product);
+    },
+
+    // Decode a response into physical values. Shared by the latest frame and by
+    // any historic one, so the two can never drift apart.
+    async _readPhysical(res, product) {
 
       const kind = res.headers.get('x-kind') || 'dbz';
       // X-Grid is "NIxNJ". The fallback is the reflectivity size, which is what
@@ -217,6 +223,12 @@
       return { phys, Ni, Nj, kind, modified };
     },
 
+    async _fetchPhysicalAt(product, stamp) {
+      const res = await fetch(`${this.WORKER}/mrms/frame/${stamp}.bin?product=${product}`);
+      if (!res.ok) throw new Error(`MRMS ${product} ${stamp} HTTP ${res.status}`);
+      return this._readPhysical(res, product);
+    },
+
     async load() {
       // ptypeRefl is not a product the worker serves — it is built here from two
       // that it does. The Fox Weather palette wants reflectivity shaded inside a
@@ -241,6 +253,12 @@
         this._fetchPhysical('hsr')
       ]);
 
+      return this._composePtype(flag, refl);
+    },
+
+    // Compose PrecipFlag and reflectivity into the packed category*100 + dBZ field.
+    // Split out so a historic pair composes exactly as the live pair does.
+    _composePtype(flag, refl) {
       if (flag.Ni !== refl.Ni || flag.Nj !== refl.Nj) {
         throw new Error(`ptype grid ${flag.Ni}x${flag.Nj} does not match ` +
                         `reflectivity ${refl.Ni}x${refl.Nj}`);
@@ -263,7 +281,47 @@
       return { data: out, Ni: flag.Ni, Nj: flag.Nj, kind: 'ptyperefl', product: 'ptyperefl' };
     },
 
-    // NO loadAt() HERE ON PURPOSE.
+    // One historic frame. The proxy serves these from NOAA's own directory, which
+    // holds roughly a day of files, so nothing is stored anywhere.
+    async loadAt(stamp) {
+      if (!this.WORKER) throw new Error('MRMSFetch.WORKER is not set');
+      if (this._product === 'ptyperefl') {
+        // Composed from two products, so both halves must come from the same run.
+        const [flag, refl] = await Promise.all([
+          this._fetchPhysicalAt('ptype', stamp),
+          this._fetchPhysicalAt('hsr', stamp)
+        ]);
+        return this._composePtype(flag, refl);
+      }
+      const f = await this._fetchPhysicalAt(this._product, stamp);
+      const out = new Uint8Array(f.Ni * f.Nj);
+      for (let i = 0; i < out.length; i++) out[i] = encode(f.phys[i], f.kind);
+      return { data: out, Ni: f.Ni, Nj: f.Nj, kind: f.kind, product: this._product, stamp };
+    },
+
+    // Load a run of frames, newest last, reporting progress as each arrives.
+    // Frames are fetched in order rather than all at once: a dozen 14000x7000
+    // grids in parallel is 1.2 GB of decode competing for one main thread, and
+    // the browser stops painting. Sequential is slower to finish and stays
+    // usable throughout, which matters more.
+    async loadSeries(count, onFrame) {
+      const stamps = (await this.times()).slice(-count);
+      const frames = [];
+      for (const stamp of stamps) {
+        try {
+          const f = await this.loadAt(stamp);
+          frames.push(f);
+          if (onFrame) onFrame(f, frames.length, stamps.length);
+        } catch (e) {
+          // A missing frame is normal — NOAA prunes while we are reading the
+          // listing. Skip it rather than abandoning the whole loop.
+          if (global.console) console.warn('[MRMS] frame', stamp, e.message);
+        }
+      }
+      return frames;
+    },
+
+
     // The worker serves only the newest frame: /mrms/latest.bin ignores ?t= and
     // ?time=, and /mrms/<stamp>.bin is a 404 — all three return an identical
     // body. /mrms/list reports which runs exist upstream but nothing can fetch

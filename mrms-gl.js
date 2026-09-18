@@ -788,6 +788,57 @@
       return true;
     },
 
+    // ---- loop -------------------------------------------------------------
+    // Frames are held as decoded byte arrays, not as GPU textures. A dozen
+    // 14000x7000 textures is 1.2 GB of VRAM and the context is lost; the same
+    // frames as Uint8Arrays sit in ordinary memory and upload in about 20 ms,
+    // which is well inside a frame at any sane playback speed.
+    _frames: [], _frameIndex: 0, _loopTimer: null,
+
+    setFrames(frames) {
+      this.stopLoop();
+      this._frames = frames || [];
+      this._frameIndex = Math.max(0, this._frames.length - 1);
+      if (this._frames.length) this.setData(this._frames[this._frameIndex]);
+    },
+
+    frameCount() { return this._frames.length; },
+    frameIndex() { return this._frameIndex; },
+
+    showFrame(i) {
+      if (!this._frames.length) return false;
+      this._frameIndex = ((i % this._frames.length) + this._frames.length) % this._frames.length;
+      this.setData(this._frames[this._frameIndex]);
+      return true;
+    },
+
+    // ms is the gap between frames; dwellMs is the extra pause on the newest one,
+    // which is what stops a loop reading as a blur — the eye needs a beat on the
+    // current state before it starts again.
+    startLoop(ms, dwellMs, onFrame) {
+      this.stopLoop();
+      if (this._frames.length < 2) return false;
+      const gap = ms || 400;
+      const dwell = dwellMs || 1200;
+      const step = () => {
+        this.showFrame(this._frameIndex + 1);
+        if (onFrame) onFrame(this._frameIndex, this._frames.length,
+                             this._frames[this._frameIndex]);
+        // Pause on the newest frame, not on the one before it. Without this the
+        // loop reads as a blur and the current state is the hardest to see.
+        const onNewest = this._frameIndex === this._frames.length - 1;
+        this._loopTimer = setTimeout(step, onNewest ? dwell : gap);
+      };
+      this._loopTimer = setTimeout(step, ms || 400);
+      return true;
+    },
+
+    stopLoop() {
+      if (this._loopTimer) { clearTimeout(this._loopTimer); this._loopTimer = null; }
+    },
+
+    isLooping() { return !!this._loopTimer; },
+
     kind() { return this._kind; },
     gridSize() { return [this._Ni, this._Nj]; },
 
