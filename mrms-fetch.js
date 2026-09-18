@@ -149,14 +149,22 @@
                'rotml30', 'rotml60', 'rotml120', 'rotml240', 'rotml360', 'rotml1440',
                'mesh', 'mesh60', 'ptyperefl'],
 
-    // MRMS PrecipFlag codes, confirmed against a live frame rather than taken from
-    // documentation: 0 none, -3 outside coverage, 1 warm stratiform rain, 6
-    // convective rain, 7 hail, 10 snow, 91 tropical stratiform, 96 tropical
-    // convective. Freezing rain and sleet do not occur in a September frame, so
-    // those codes come from the MRMS spec and stay UNVERIFIED until winter — if
-    // the ice or mix bands ever look wrong, start here.
-    //   0xx rain   1xx snow   2xx mix   3xx ice
-    PTYPE_BAND: { 1:0, 6:0, 7:0, 91:0, 96:0,  10:1, 2:1,  4:2, 5:2,  3:3 },
+    // MRMS PrecipFlag, from NOAA's own flag table rather than from memory. An
+    // earlier version had two of these backwards — 3 read as freezing rain and 10
+    // as snow — which painted cool stratiform rain over Wyoming in snow blue.
+    //
+    //   -3  no coverage          0   no precipitation
+    //    1  warm stratiform rain  3   SNOW
+    //    6  convection            7   hail
+    //   10  COOL STRATIFORM RAIN  91  tropical stratiform rain
+    //                            96  tropical convective rain
+    //
+    // Flags 2, 4, 5, 8 and 9 are unused, so this product has NO freezing rain and
+    // NO sleet category. The mix and ice bands of the four-band palette can never
+    // be filled from PrecipFlag — it separates rain from snow and nothing else.
+    // Anything claiming otherwise is a mapping error, not winter data.
+    //   0xx rain   1xx snow
+    PTYPE_BAND: { 1:0, 6:0, 7:0, 10:0, 91:0, 96:0,  3:1 },
     _product: 'hsr',
     _timer: null,
     _lastModified: null,

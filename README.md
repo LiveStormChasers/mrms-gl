@@ -180,11 +180,22 @@ category. ptyperefl composes them as category * 100 + dBZ, which is the layout
 the four-band palette expects — rain 2.5-94, snow 105-170, mix 205-270,
 ice 305-360.
 
-The flag values were confirmed against a live frame: 0 none, -3 outside radar
-coverage, 1 warm stratiform rain, 6 convective rain, 7 hail, 10 snow, 91 and 96
-tropical variants. Freezing rain and sleet do not occur in a September frame, so
-the mix and ice band mappings come from the specification and stay UNVERIFIED
-until winter. If those bands ever look wrong, start there.
+The flag values come from NOAA's published table, not from memory:
+
+  -3  no coverage            0   no precipitation
+   1  warm stratiform rain   3   snow
+   6  convection             7   hail
+  10  cool stratiform rain   91  tropical stratiform rain
+                             96  tropical convective rain
+
+Flags 2, 4, 5, 8 and 9 are unused, so this product has no freezing rain and no
+sleet category. Only two of the palette's four bands can ever be filled from it —
+rain and snow. A mix or ice band appearing means the mapping is wrong, not that
+it is winter.
+
+An earlier version had two codes backwards, reading 3 as freezing rain and 10 as
+snow, which painted cool stratiform rain across Wyoming in snow blue. It looked
+plausible and was wrong, which is the failure mode to watch for here.
 
 
 Colour tables
