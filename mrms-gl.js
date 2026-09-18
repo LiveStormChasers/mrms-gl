@@ -964,18 +964,16 @@
     setBlend(on) { this._blendOn = !!on; if (!on) this._blend = 0; },
     _blendOn: true,
 
-    // Spatial smoothing, 0 to 1. OFF by default, and that is a considered
-    // default rather than an oversight.
+    // Spatial smoothing, 0 to 1. Default 0.8, set by eye against a reference
+    // renderer on the same frame — 0.8 here matches what that one calls 0.5,
+    // because it applies to a raw 1 km grid rather than to data already
+    // resampled into tiles, so the numbers are not comparable.
     //
-    // It is a 3x3 mean over every sample, so it softens the whole field, not
-    // only the edges — small cells, the texture inside a band and the speckle at
-    // the low end all go with it. On a tile-based renderer the data has already
-    // been resampled before it reaches the browser, so a further 0.5 there is a
-    // gentler operation than 0.5 on a raw 1 km grid. Here it reads as blur.
-    //
-    // Left in because it is occasionally wanted for a wide, quiet view, but it
-    // costs detail and should be turned on deliberately.
-    _smooth: 0,
+    // A 3x3 mean over each corner sample before they are interpolated. It tidies
+    // the interior contours, which are otherwise noticeably ragged against a
+    // smoothed reference. An earlier version averaged the final value instead,
+    // anchored to the base cell, which drew flat 1 km blocks.
+    _smooth: 0.8,
     setSmooth(x) {
       this._smooth = Math.max(0, Math.min(1, Number(x) || 0));
       if (this._map) this._map.triggerRepaint();
