@@ -204,6 +204,14 @@ the same nominal speed — more weather per step, not a higher frame rate.
 The selection always ends on the newest frame and returns what exists rather than
 failing, so a wide step against a short listing simply yields fewer frames.
 
+That last point cost a long evening. The proxy's listing was capped at twenty
+timestamps, so a twelve-frame loop at every third frame quietly became seven
+frames over forty-two minutes. Against a reference renderer showing twelve over
+an hour, the loop felt wrong in a way no amount of speed or spacing adjustment
+could fix — a short cycle repeats too often and reads as a different thing
+entirely. Frame COUNT and window length matter as much as the step timing, and
+neither is visible from a screenshot. The cap is now 120, which is four hours.
+
 
 The rotation scale
 ------------------
