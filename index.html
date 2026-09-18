@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MRMS-GL — test bench</title>
+<link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet">
+<script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+<style>
+  html,body{margin:0;height:100%;background:#0b0e13;font:14px system-ui;color:#fff}
+  #map{position:absolute;inset:0}
+  #panel{position:absolute;top:12px;left:12px;z-index:5;background:rgba(14,18,24,.94);
+         border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:14px 16px;width:280px}
+  h1{font-size:15px;margin:0 0 4px}
+  .sub{font-size:12px;color:#fff;opacity:.6;margin-bottom:12px}
+  label{display:block;font-size:12px;font-weight:600;margin:10px 0 4px}
+  input[type=range]{width:100%}
+  .stat{display:flex;justify-content:space-between;font-size:12px;padding:3px 0}
+  .stat b{font-weight:700}
+  button{width:100%;padding:8px;margin-top:10px;font:600 13px system-ui;color:#fff;cursor:pointer;
+         background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);border-radius:6px}
+  #legend{position:absolute;bottom:14px;left:12px;z-index:5;background:rgba(14,18,24,.94);
+          border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:8px 10px}
+  #legend canvas{display:block;border-radius:3px}
+  #legend .lbl{display:flex;justify-content:space-between;font-size:10px;opacity:.7;margin-top:3px}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="panel">
+  <h1>MRMS-GL</h1>
+  <div class="sub">GPU reflectivity — test bench</div>
+
+  <div class="stat"><span>status</span><b id="sStatus">starting</b></div>
+  <div class="stat"><span>frame age</span><b id="sAge">—</b></div>
+  <div class="stat"><span>decode</span><b id="sDecode">—</b></div>
+  <div class="stat"><span>map zoom</span><b id="sZoom">—</b></div>
+  <div class="stat"><span>grid</span><b id="sGrid">—</b></div>
+  <div class="stat"><span>kind</span><b id="sKind">—</b></div>
+  <div class="stat"><span>cells</span><b id="sCells">—</b></div>
+  <div class="stat"><span>peak</span><b id="sPeak">—</b></div>
+
+  <label>Product</label>
+  <select id="product">
+    <option value="hsr" selected>Seamless hybrid scan</option>
+    <option value="composite">Composite</option>
+    <option value="shear02">Az shear 0-2km</option>
+    <option value="shear36">Az shear 3-6km</option>
+    <option value="rot30">Rotation track 30min</option>
+    <option value="rot60">Rotation track 1hr</option>
+    <option value="rot120">Rotation track 2hr</option>
+    <option value="rot240">Rotation track 4hr</option>
+    <option value="rot360">Rotation track 6hr</option>
+    <option value="rot1440">Rotation track 24hr</option>
+    <option value="rotml30">Rotation ML 30min</option>
+    <option value="rotml60">Rotation ML 1hr</option>
+    <option value="rotml1440">Rotation ML 24hr</option>
+    <option value="ptyperefl">Precip type</option>
+    <option value="mesh">MESH hail</option>
+    <option value="mesh60">MESH 60min max</option>
+  </select>
+
+  <button id="findPeak">Fly to strongest</button>
+
+  <label>Opacity <span id="oVal">90%</span></label>
+  <input type="range" id="opacity" min="0" max="100" value="90">
+
+  <label>No-data weight <span id="nVal">0.00</span></label>
+  <input type="range" id="nodata" min="0" max="100" value="0">
+
+  <button id="reload">Reload frame</button>
+  <button id="toggle">Hide radar</button>
+</div>
+
+<div id="legend">
+  <canvas id="legendCanvas" width="260" height="12"></canvas>
+  <div class="lbl"><span>5</span><span>20</span><span>35</span><span>50</span><span>65</span><span>80 dBZ</span></div>
+</div>
+
+<script src="./mrms-gl.js"></script>
+<script src="./mrms-fetch.js"></script>
+<script>
+// A public Mapbox token is required to draw a basemap. The renderer itself needs
+// no key of any kind — swap this for your own when running the bench.
+// The renderer needs no key of any kind. This token is only for the basemap
+// underneath it — paste one in, or append ?token=... to the URL.
+mapboxgl.accessToken =
+  new URLSearchParams(location.search).get('token') ||
+  window.MAPBOX_TOKEN ||
+  'PUT_A_TOKEN_HERE';
+if (mapboxgl.accessToken === 'PUT_A_TOKEN_HERE') {
+  document.body.insertAdjacentHTML('afterbegin',
+    '<div style="position:fixed;inset:auto 0 0 0;z-index:9;background:#7a1f1f;' +
+    'padding:10px 16px;font:600 13px system-ui">No Mapbox token — the basemap ' +
+    'will not draw. Add ?token=pk.… to the URL. The radar itself needs no key.</div>');
+}
+
+const map = new mapboxgl.Map({
+  container: 'map',
+  style: 'mapbox://styles/mapbox/dark-v11',
+  center: [-97.5, 38.5],
+  zoom: 4.6
+});
+
+const $ = id => document.getElementById(id);
+let lastLoad = 0;
+
+// The legend has to follow the product. Showing a dBZ scale under a shear field
+// is worse than showing none — it invites reading 0.01 s^-1 as 20 dBZ.
+const LEGENDS = {
+  dbz:      { labels: ['5','20','35','50','65','80 dBZ'],
+              stops: () => MRMSGL.ramp().map(([v,h]) => [(v - 5) / 75, h]) },
+  shear:    { labels: ['0.005','0.010','0.015','0.020','0.030','0.06 s\u207b\u00b9'],
+              stops: () => [[0,'#3c3c46'],[0.12,'#7d7d96'],[0.25,'#c8c8d2'],
+                            [0.33,'#ffff64'],[0.45,'#ff8c00'],[0.55,'#ff3200'],
+                            [0.70,'#b400b4'],[1,'#ffffff']] },
+  mesh:     { labels: ['6','13','25','38','50','75 mm'],
+              stops: () => [[0,'#00c8ff'],[0.15,'#00ff96'],[0.3,'#ffff00'],
+                            [0.5,'#ff8c00'],[0.7,'#ff0000'],[1,'#ff00ff']] },
+  category: { labels: ['rain','fzra','sleet','snow','wet snow','hail'],
+              stops: () => [[0,'#00b400'],[0.2,'#ff00ff'],[0.4,'#ff64ff'],
+                            [0.6,'#64c8ff'],[0.8,'#0064ff'],[1,'#ffffff']] }
+};
+
+function drawLegend(kind) {
+  const spec = LEGENDS[kind || 'dbz'] || LEGENDS.dbz;
+  const c = $('legendCanvas'), ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  const g = ctx.createLinearGradient(0, 0, c.width, 0);
+  spec.stops().forEach(([t, hex]) => g.addColorStop(Math.max(0, Math.min(1, t)), hex));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, c.width, c.height);
+  const row = document.querySelector('#legend .lbl');
+  if (row) row.innerHTML = spec.labels.map(l => `<span>${l}</span>`).join('');
+}
+
+// The whole point of this page: nothing else is managing the renderer, so a
+// frame set here is not overwritten a moment later by an app's own poll.
+let lastFrame = null;
+
+function report(frame) {
+  lastFrame = frame;
+  const d = frame.data;
+  let n = 0, max = 0;
+  for (let i = 0; i < d.length; i++) { const v = d[i]; if (!v) continue; n++; if (v > max) max = v; }
+  drawLegend(frame.kind);
+  $('sGrid').textContent  = frame.Ni + 'x' + frame.Nj;
+  $('sKind').textContent  = frame.kind;
+  $('sCells').textContent = n.toLocaleString();
+  // Report the peak in the product's own units rather than a raw byte.
+  const unit = frame.kind === 'shear' ? (max / 4000).toFixed(4) + ' s\u207b\u00b9'
+             : frame.kind === 'mesh'  ? (max * 2) + ' mm'
+             : frame.kind === 'dbz'   ? (max / 2 - 30).toFixed(1) + ' dBZ'
+             : 'cat ' + max;
+  $('sPeak').textContent = unit + (max === 254 ? '  CLAMPED' : '');
+}
+
+$('product').addEventListener('change', async e => {
+  MRMSFetch.stop();
+  MRMSFetch.setProduct(e.target.value);
+  $('sStatus').textContent = 'loading';
+  try {
+    const frame = await MRMSFetch.load();
+    MRMSGL.setData(frame);
+    report(frame);
+    $('sStatus').textContent = 'live';
+  } catch (err) { $('sStatus').textContent = err.message; }
+});
+
+// Rotation is rare and small. Hunting for it by eye across the country does not
+// work, so jump straight to the strongest cell in the frame on screen.
+$('findPeak').addEventListener('click', () => {
+  if (!lastFrame) return;
+  const f = lastFrame;
+  let bi = -1, bv = 0;
+  for (let i = 0; i < f.data.length; i++) if (f.data[i] > bv) { bv = f.data[i]; bi = i; }
+  if (bi < 0) return;
+  const j = Math.floor(bi / f.Ni), x = bi % f.Ni;
+  const lon = -129.995 + (x / f.Ni) * 69.99;
+  const lat = 54.995 - (j / f.Nj) * 34.99;
+  map.jumpTo({ center: [lon, lat], zoom: 9 });
+});
+
+// The modules carry no endpoint of their own — point the fetcher at a proxy.
+// Override with ?worker=https://... to test against a different one.
+MRMSFetch.WORKER =
+  new URLSearchParams(location.search).get('worker') ||
+  window.MRMS_WORKER ||
+  'PUT_YOUR_PROXY_URL_HERE';
+
+map.on('load', () => {
+  MRMSGL.attach(map);
+  drawLegend();
+
+  MRMSFetch.start((frame, modified) => {
+    const t0 = performance.now();
+    MRMSGL.setData(frame);
+    report(frame);
+    lastLoad = Date.now();
+    $('sStatus').textContent = 'live';
+    $('sDecode').textContent = Math.round(performance.now() - t0) + ' ms upload';
+    $('sAge').textContent = modified ? new Date(modified).toLocaleTimeString() : 'just now';
+  });
+
+  setInterval(() => {
+    if (!lastLoad) return;
+    const s = Math.round((Date.now() - lastLoad) / 1000);
+    $('sStatus').textContent = s > 240 ? 'stale' : 'live';
+  }, 5000);
+});
+
+map.on('zoom', () => $('sZoom').textContent = map.getZoom().toFixed(2));
+
+$('opacity').addEventListener('input', e => {
+  MRMSGL.setOpacity(e.target.value / 100);
+  $('oVal').textContent = e.target.value + '%';
+});
+
+// How much an empty grid cell counts when neighbours are blended. 0 keeps
+// echoes the size the data says; 1 is plain bilinear and grows a soft halo.
+$('nodata').addEventListener('input', e => {
+  const v = e.target.value / 100;
+  MRMSGL.setNodataWeight(v);
+  $('nVal').textContent = v.toFixed(2);
+});
+
+$('reload').addEventListener('click', async () => {
+  $('sStatus').textContent = 'loading';
+  try { MRMSGL.setData(await MRMSFetch.load()); lastLoad = Date.now(); $('sStatus').textContent = 'live'; }
+  catch (e) { $('sStatus').textContent = 'failed'; }
+});
+
+$('toggle').addEventListener('click', e => {
+  if (MRMSGL.isAttached()) { MRMSGL.detach(map); e.target.textContent = 'Show radar'; }
+  else { MRMSGL.attach(map); e.target.textContent = 'Hide radar'; }
+});
+</script>
+</body>
+</html>
