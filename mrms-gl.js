@@ -1075,14 +1075,15 @@
       gl.bindBuffer(gl.ARRAY_BUFFER, this._buf);
       gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
 
-      // Colour ramp. NEAREST, not LINEAR: linear here would bleed neighbouring
-      // bands into one another and soften every colour boundary.
-      // NEAREST, not LINEAR, and this matters more than it looks. LINEAR was
+      // Colour ramp. NEAREST, not LINEAR, and this matters more than it looks.
+      // LINEAR was
       // tried to smooth the half-decibel quantisation, and it does — but it also
       // fades every colour boundary in the palette, so green runs into yellow
       // into red with no edge anywhere. Side by side on the same frame it reads
       // as a blurred picture rather than a radar image. Hard bands are what makes
       // a reflectivity field legible: the eye reads the boundary, not the gradient.
+      this._rampTex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this._rampTex);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
