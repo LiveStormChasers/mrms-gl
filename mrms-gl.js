@@ -48,22 +48,46 @@
   // then a grey tail to white. The old ramp stopped at 43 dBZ and clamped, so
   // every core above that drew as one flat near-white blob with no structure.
   // ---------------------------------------------------------------------------
+  // Reflectivity palette, 192 stops from 0 to 100 dBZ at half-decibel spacing —
+  // one stop per encoded byte, because the data is quantised to half a decibel.
+  //
+  // That spacing is the point. A coarser table stretched across 256 texels repeats
+  // neighbouring colours, and the repeats show as contour rings through a slowly
+  // varying core. With a stop per value there is nothing to interpolate across and
+  // the rings do not appear.
   const RAMP = [
-    [0,'#01f3f7'],[1,'#05dbe7'],[2,'#09c3d7'],[3,'#0dabc7'],[3.5,'#0fc3bf'],[4,'#1193b7'],
-    [5,'#157ba7'],[8.5,'#1081bb'],[10.5,'#0b8cce'],[12.5,'#0798ff'],[13,'#069be6'],
-    [14,'#15bfb4'],[14.5,'#25e17d'],[16.5,'#21d370'],[18.5,'#1dc563'],[21,'#18b454'],
-    [23,'#15a747'],[25,'#119a3b'],[27,'#0e8c2e'],[29,'#0a7f22'],[31,'#067115'],[33,'#026409'],
-    [34,'#80af13'],[34.5,'#ffff21'],[36,'#ffe712'],[37.5,'#ffcf04'],[39,'#ffb700'],
-    [40.5,'#ff8c00'],[41.5,'#ff6900'],[42.5,'#ff4600'],[43.5,'#ff2300'],[44.5,'#ff0000'],
-    [47,'#e40000'],[49.5,'#c90000'],[52.5,'#aa0000'],[54.5,'#b400b4'],[55.5,'#c013be'],
-    [56.5,'#cc27c9'],[57.5,'#d83bd3'],[58.5,'#e54ede'],[59.5,'#f162e8'],[60.5,'#fd75f3'],
-    [61,'#e86de8'],[61.5,'#d468cc'],[62,'#c05db8'],[62.5,'#ab55a5'],[63,'#974d92'],
-    [63.5,'#83457e'],[64,'#6f3d6b'],[64.5,'#5a3558'],[65,'#462d44'],[65.5,'#322531'],
-    [66,'#1d1e1d'],[67.5,'#292a29'],[69,'#353635'],[70.5,'#414241'],[72,'#4d4e4d'],
-    [73.5,'#595a59'],[75,'#656665'],[76.5,'#717271'],[78,'#7d7e7d'],[79.5,'#898a89'],
-    [81,'#969696'],[82.5,'#a2a2a2'],[84,'#aeaeae'],[85.5,'#bababa'],[87,'#c6c6c6'],
-    [88.5,'#d2d2d2'],[90,'#dedede'],[91.5,'#eaeaea'],[93,'#f6f6f6'],[94.5,'#ffffff'],
-    [100,'#ffffff']
+    [0.0,'#01f3f7'],[0.5,'#03e7ef'],[1.0,'#05dbe7'],[1.5,'#07cfdf'],[2.0,'#09c3d7'],[2.5,'#0bb7cf'],
+    [3.0,'#0dabc7'],[3.5,'#0fc3bf'],[4.0,'#1193b7'],[4.5,'#1387af'],[5.0,'#157ba7'],[5.5,'#17709f'],
+    [6.0,'#1572a3'],[6.5,'#1475a8'],[7.0,'#1378ad'],[7.5,'#127bb2'],[8.0,'#117eb6'],[8.5,'#1081bb'],
+    [9.0,'#0f84c0'],[9.5,'#0e87c5'],[10.0,'#0c89c9'],[10.5,'#0b8cce'],[11.0,'#0a8fd3'],[11.5,'#0992d8'],
+    [12.0,'#0895dc'],[12.5,'#0798ff'],[13.0,'#069be6'],[13.5,'#059eeb'],[14.0,'#15bfb4'],[14.5,'#25e17d'],
+    [15.0,'#24dd79'],[15.5,'#23da76'],[16.0,'#22d673'],[16.5,'#21d370'],[17.0,'#20cf6c'],[17.5,'#1fcc69'],
+    [18.0,'#1ec866'],[18.5,'#1dc563'],[19.0,'#1cc260'],[19.5,'#1bbe5d'],[20.0,'#1abb5a'],[20.5,'#1cb857'],
+    [21.0,'#18b454'],[21.5,'#18b151'],[22.0,'#17ae4d'],[22.5,'#16aa4a'],[23.0,'#15a747'],[23.5,'#14a444'],
+    [24.0,'#13a041'],[24.5,'#129d3e'],[25.0,'#119a3b'],[25.5,'#109638'],[26.0,'#0f9335'],[26.5,'#0f9032'],
+    [27.0,'#0e8c2e'],[27.5,'#0d892b'],[28.0,'#0c8528'],[28.5,'#0b8225'],[29.0,'#0a7f22'],[29.5,'#097b1f'],
+    [30.0,'#08781b'],[30.5,'#077518'],[31.0,'#067115'],[31.5,'#056e12'],[32.0,'#046b0f'],[32.5,'#03670c'],
+    [33.0,'#026409'],[33.5,'#016005'],[34.0,'#80af13'],[34.5,'#ffff21'],[35.0,'#fff71c'],[35.5,'#ffef17'],
+    [36.0,'#ffe712'],[36.5,'#ffdf0e'],[37.0,'#ffd709'],[37.5,'#ffcf04'],[38.0,'#ffc700'],[38.5,'#ffbf00'],
+    [39.0,'#ffb700'],[39.5,'#ffaf00'],[40.0,'#ff9d00'],[40.5,'#ff8c00'],[41.0,'#ff7a00'],[41.5,'#ff6900'],
+    [42.0,'#ff5700'],[42.5,'#ff4600'],[43.0,'#ff3400'],[43.5,'#ff2300'],[44.0,'#ff1100'],[44.5,'#ff0000'],
+    [45.0,'#f90000'],[45.5,'#f40000'],[46.0,'#ef0000'],[46.5,'#e90000'],[47.0,'#e40000'],[47.5,'#df0000'],
+    [48.0,'#d90000'],[48.5,'#d40000'],[49.0,'#cf0000'],[49.5,'#c90000'],[50.0,'#c30000'],[50.5,'#be0000'],
+    [51.0,'#b90000'],[51.5,'#b40000'],[52.0,'#af0000'],[52.5,'#aa0000'],[53.0,'#a50000'],[53.5,'#a00000'],
+    [54.0,'#9a0000'],[54.5,'#b400b4'],[55.0,'#ba09b9'],[55.5,'#c013be'],[56.0,'#c61dc3'],[56.5,'#cc27c9'],
+    [57.0,'#d231ce'],[57.5,'#d83bd3'],[58.0,'#df44d8'],[58.5,'#e54ede'],[59.0,'#eb58e3'],[59.5,'#f162e8'],
+    [60.0,'#f76ced'],[60.5,'#fd75f3'],[61.0,'#e86de8'],[61.5,'#d468cc'],[62.0,'#c05db8'],[62.5,'#ab55a5'],
+    [63.0,'#974d92'],[63.5,'#83457e'],[64.0,'#6f3d6b'],[64.5,'#5a3558'],[65.0,'#462d44'],[65.5,'#322531'],
+    [66.0,'#1d1e1d'],[66.5,'#212221'],[67.0,'#252625'],[67.5,'#292a29'],[68.0,'#2d2e2d'],[68.5,'#313231'],
+    [69.0,'#353635'],[69.5,'#393a39'],[70.0,'#3d3e3d'],[70.5,'#414241'],[71.0,'#454645'],[71.5,'#494a49'],
+    [72.0,'#4d4e4d'],[72.5,'#515251'],[73.0,'#555655'],[73.5,'#595a59'],[74.0,'#5d5e5d'],[74.5,'#616261'],
+    [75.0,'#656665'],[75.5,'#696a69'],[76.0,'#6d6e6d'],[76.5,'#717271'],[77.0,'#757675'],[77.5,'#797a79'],
+    [78.0,'#7d7e7d'],[78.5,'#818281'],[79.0,'#858685'],[79.5,'#898a89'],[80.0,'#8e8e8e'],[80.5,'#929292'],
+    [81.0,'#969696'],[81.5,'#9a9a9a'],[82.0,'#9e9e9e'],[82.5,'#a2a2a2'],[83.0,'#a6a6a6'],[83.5,'#aaaaaa'],
+    [84.0,'#aeaeae'],[84.5,'#b2b2b2'],[85.0,'#b6b6b6'],[85.5,'#bababa'],[86.0,'#bebebe'],[86.5,'#c2c2c2'],
+    [87.0,'#c6c6c6'],[87.5,'#cacaca'],[88.0,'#cecece'],[88.5,'#d2d2d2'],[89.0,'#d6d6d6'],[89.5,'#dadada'],
+    [90.0,'#dedede'],[90.5,'#e2e2e2'],[91.0,'#e6e6e6'],[91.5,'#eaeaea'],[92.0,'#eeeeee'],[92.5,'#f2f2f2'],
+    [93.0,'#f6f6f6'],[93.5,'#fafafa'],[94.0,'#fefefe'],[94.5,'#ffffff'],[95.0,'#ffffff'],[100.0,'#ffffff']
   ];
 
   // The byte in the data texture encodes dBZ as (dbz + 30) * 2, so 0 dBZ is 60
@@ -1075,17 +1099,22 @@
       gl.bindBuffer(gl.ARRAY_BUFFER, this._buf);
       gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
 
-      // Colour ramp. NEAREST, not LINEAR, and this matters more than it looks.
-      // LINEAR was
-      // tried to smooth the half-decibel quantisation, and it does — but it also
-      // fades every colour boundary in the palette, so green runs into yellow
-      // into red with no edge anywhere. Side by side on the same frame it reads
-      // as a blurred picture rather than a radar image. Hard bands are what makes
-      // a reflectivity field legible: the eye reads the boundary, not the gradient.
+      // Colour ramp, sampled LINEAR.
+      //
+      // This was measured rather than chosen: hooking texParameteri on a
+      // reference renderer showed its own 256x1 ramp texture set to LINEAR.
+      //
+      // LINEAR alone was tried earlier against a 73-stop table and softened every
+      // colour boundary, which looked wrong. The fault was the table, not the
+      // filter — stretched over 256 texels it repeats colours, so interpolation
+      // has room to smear. The palette now carries a stop per half decibel, one
+      // per encoded byte, so adjacent texels differ by a single step and LINEAR
+      // has almost nothing to blur. Boundaries stay sharp and the contour rings
+      // through slowly varying cores disappear.
       this._rampTex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, this._rampTex);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 1, 0, gl.RGBA,
@@ -1246,9 +1275,9 @@
       const gl = map.painter && map.painter.context && map.painter.context.gl;
       if (!gl) return;
       gl.bindTexture(gl.TEXTURE_2D, this._rampTex);
-      // Always NEAREST — see the note at the creation site. A gradient between
-      // palette stops blurs every colour boundary in the field.
-      const filt = gl.NEAREST;
+      // LINEAR — see the note at the creation site. With a stop per half decibel
+      // there is almost nothing between texels to interpolate across.
+      const filt = gl.LINEAR;
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filt);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filt);
       // A loaded .pal only applies to reflectivity — it is a dBZ table, and
